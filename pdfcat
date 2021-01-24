@@ -1,0 +1,252 @@
+#!/bin/bash
+Version=0.00
+Myname="${0##*/}"
+:<<'DOC'
+= pdfcat - concatenate pdf's
+
+= Synopsis
+pdfcat [options] filenames	
+
+== Options
+-h|--help	print short help and exit
+-H|--Help	print full documentation and exit
+-V|--version	print version and exit
+-c|--crop	crop all pages of the output pdf
+-d|--debug	do not remove temporary directory; implies --verbose
+-f|--font	set font for title page and captions
+		optionally add pointsize; default: DejaVuSerif 12
+-g|--geometry	pdf page size for output in mm; default: 210x297
+-m|--margins	left top right bottom margins in mm; default: "0 0 0 0"
+		if one number is given, it is used for all margins
+		implies --crop
+-o|--output	output file; default: standard output
+-t|--toc	generate subsections and toc
+-v|--verbose	run verbosely
+
+= Description 
+pdfcat concatenates two or more pdf's to one pdf. If a specified filename has no
+|.pdf| extension, it is added. If no output file is specified, standard output is
+used. 
+The output pdf page size will be A4, unless the |--geometry| option is used.
+With the |--crop| option, every page will be cropped with zero margin, unless
+the |--margins| option specifies other margins.
+The |--margins| option implies |--crop| and specifies left, top, right, and
+bottom margins in mm in a space separated string, which must of course be double
+quoted. The value can also be a single number, which is used for all margins.
+If this option is not used, |--crop| will apply zero margins. 
+
+= Author
+[Wybo Dekker](wybo@dekkerdocumenten.nl)
+
+= Copyright
+Released under the [GNU General Public License](www.gnu.org/copyleft/gpl.html)
+DOC
+
+
+REd='\e[38;5;9m' Mag='\e[38;5;5m' Nor='\e[0m'
+    die() { local i; for i; do echo -e "$Myname: $REd$i$Nor"; done 1>&2; exit 1; }
+   Warn() { local i; for i; do echo -e "$Myname: $Mag$i$Nor"; done 1>&2; }
+   warn() { $verbose && Warn "$@"; }
+helpsrt() { sed -n '/^= Synopsis/,/^= /p' "$0"|sed '1d;$d'; exit; }
+helpall() { sed -n "/^:<<'DOC'$/,/^DOC/p" "$0"|sed '1d;$d'|
+            less -P"$Myname-${Version/./·} (press h for help, q to quit)";exit; }
+
+:<<'DOC' #---------------------------------------------------------------------
+= texescape
+synopsis:	 texescape varname
+description:	escape #, _, %, & in the variable named in the argument
+		 x='50%'; texescape x; echo $x → 50\%
+DOC
+#-------------------------------------------------------------------------------
+texescape() {
+   eval "$1=\${$1//#/\\\\#}
+   $1=\${$1//%/\\\\%}
+   $1=\${$1//&/\\\\&}
+   $1=\${$1//_/\\\\_}"
+}
+
+:<<'DOC' #---------------------------------------------------------------------
+= excheck
+synopsis:	 excheck executable1 [executable2...]
+description:	check if all needed execs are there and getopt is GNU
+DOC
+#-------------------------------------------------------------------------------
+excheck() {
+   local ok=true i
+   ((BASH_VERSINFO>=4)) || die "Need bash version >= 4"
+   for i; do 
+      command -v "$i" > /dev/null && continue
+      Warn "Missing executable: $i"
+      ok=false
+   done
+   $ok || die
+   getopt -T 
+   [[ $? -ne 4 ]] && die "Your getopt is not GNU"
+}
+
+
+
+:<<'DOC' #----------------------------------------------------------------------
+= handle_options
+synopsis:	 handle_options "$@"
+description:	handle the options.
+globals used:	 Myname Version verbose toc outfile debug crop xmm ymm margins
+		 font fsize
+globals  set:	 args
+DOC
+#-------------------------------------------------------------------------------
+handle_options() {
+   local options
+   options=$(getopt \
+      -n "$Myname" \
+      -o hHVdf:Ivcm:o:g:t \
+      -l help,Help,version,verbose,font:,margins:,output:,geometry:,crop:,debug,toc \
+      -- "$@"
+   ) || exit 1
+   eval set -- "$options"
+   crop=false outfile='' xmm=210 ymm=297
+   margins=0 toc=false verbose=false font=DejaVuSerif fsize=12
+   while true; do
+      case $1 in
+      (-h|--help)     # print short help and exit
+                      helpsrt
+                      ;;
+      (-H|--Help)     # print full documentation and exit
+                      helpall
+                      ;;
+      (-V|--version)  # print version and exit
+                      echo $Version
+                      exit
+                      ;;
+      (-c|--crop)     # crop all pages of the output pdf
+                      crop=true
+                      shift
+                      ;;
+      (-d|--debug)    # do not remove temporary directory; implies --verbose
+                      verbose=true
+                      shift
+                      ;;
+      (-f|--font)     # set font for title page and captions
+                      # optionally add pointsize; default: DejaVuSerif 12
+                      if [[ $2 =~ ([A-Za-z_\ -]+)\ *([0-9]*)$ ]]; then
+                         font=${BASH_REMATCH[1]% }
+                         fsize=${BASH_REMATCH[2]}
+                      fi
+                      : "${fsize:=12}"
+                      shift 2
+                      ;;
+      (-g|--geometry) # pdf page size for output in mm; default: 210x297
+                      IFS=x read -r xmm ymm <<<"$2"
+                      shift 2
+                      ;;
+      (-m|--margins)  # left top right bottom margins in mm; default: "0 0 0 0"
+                      # if one number is given, it is used for all margins
+                      # implies --crop
+                      margins="$2"
+                      crop=true
+                      shift 2
+                      ;;
+      (-o|--output)   # output file; default: standard output
+                      outfile=${2%.pdf}
+                      shift 2
+                      ;;
+      (-t|--toc)      # generate subsections and toc
+                      toc=true
+                      shift
+                      ;;
+      (-v|--verbose)  # run verbosely
+                      verbose=true
+                      shift
+                      ;;
+      (-I)            instscript "$0" ||
+                         die 'the -I option is for developers only'
+                      exit
+                      ;;
+      (--)	      shift
+		      break
+                      ;;
+      (*)	      break
+		      ;;
+      esac
+   done
+   args=("$@")
+}
+
+excheck getopt pdfcrop lualatex
+handle_options "$@"
+set -- "${args[@]}"
+
+[[ -z $outfile ]] && [[ -t 1 ]] &&
+   die "if you don't specify --output, redirect the output"
+
+# do all arguments exist as pdf files?
+pdfs=()
+for i; do 
+   pdf="$i"
+   [[ $pdf =~ \.(pdf|PDF) ]] || pdf=${i%.pdf}.pdf
+   [[ -e $pdf ]] || die "File $pdf does not exist!"
+   typ=$(file --mime-type -bL "$pdf")
+   [[ $typ == 'application/pdf' ]] || die "$pdf is not a pdf file"
+   rp=$(realpath "$pdf")
+   warn "adding $rp"
+   pdfs+=("$rp")
+done
+
+tmp=$(mktemp -dt "$Myname.XXXXXXXXXX")
+warn "running in temporary directory $tmp"
+pdf=$(realpath "${outfile%.pdf}.pdf") # absolute path to output
+cd "$tmp" || die "Could not cd to $tmp"
+cat <<-EOD >main.tex
+%!lualatex
+	\\documentclass{article}
+	\\usepackage{fontspec}
+	\\setmainfont{$font}
+	\\usepackage[papersize={${xmm}mm,${ymm}mm},margin=25mm]{geometry}
+	\\usepackage{pdfpages,graphicx}
+	\\usepackage[hidelinks]{hyperref}
+	\\begin{document}
+	\\fontsize{$fsize}{$((fsize+4))}\selectfont
+	EOD
+
+$toc && cat <<-EOD >>main.tex
+	\\tableofcontents\\newpage\\setcounter{secnumdepth}{0}
+	EOD
+
+n=0
+# copy input files (which may contain spaces or comma's) to 0.pdf, 1.pdf...:
+for i in "${pdfs[@]}"; do
+   warn "copying $i"
+   cp "$i" $n.pdf || die "error copying $i to $n.pdf"
+   # section header = basename without extension 
+   j="${i%.pdf}"
+   j=${j##*/}
+   texescape j
+   $toc && echo "\\subsection{$j}"
+   echo "\\includepdf[pages = -]{$n}"
+   (( n++ ))
+done >>main.tex
+echo "\\end{document}" >>main.tex
+warn "running lualatex"
+echo x | lualatex main.tex &>/dev/null ||
+   die "Errors running lualatex; inspect $tmp"
+[[ $toc ]] && lualatex main.tex &>/dev/null
+
+if $crop; then
+   # convert mm to bp
+   if [[ ! $margins == '0' ]]; then
+      m=$margins
+      warn "adding margins of $m mm"
+      margins=''
+      for i in $m; do
+         margins+=" $(echo "$i*2.835"|bc -l)"
+      done
+   fi
+   pdfcrop --margins="$margins" "main.pdf" "main.pdf" >/dev/null ||
+      die "Error running pdfcrop; try --debug"
+fi
+if [[ -z $outfile ]]; then
+   cat "main.pdf"
+else
+   mv "main.pdf" "$pdf"
+fi
+rm -r "$tmp"
